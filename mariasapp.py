@@ -7,6 +7,81 @@ from itertools import combinations
 import random
 
 st.set_page_config(layout="wide")
+st.markdown(
+    """
+    <style>
+    /* Odsazení celého hlavního obsahu od horního okraje */
+    main > div:has(.block-container) {
+        padding-top: 60px;
+    }
+    .stApp {
+        background-image: url('https://img41.rajce.idnes.cz/d4102/19/19642/19642596_185bd55429092dbd5dccd20ff2c485cb/images/card_back_texture.jpg?ver=0');
+        background-repeat: repeat;
+        background-size: 100px 100px;
+        background-attachment: fixed;
+        font-family: 'Segoe UI', sans-serif;
+    }
+
+    /* Pozadí hlavního kontejneru – textura papíru */
+    .block-container {
+        background-image: url('https://img41.rajce.idnes.cz/d4102/19/19642/19642596_185bd55429092dbd5dccd20ff2c485cb/images/paper.jpg?ver=0');
+        background-repeat: repeat;
+        background-size: 300px 300px;
+        background-color: rgba(255, 255, 255, 0.75);
+        border-radius: 16px;
+        padding: 2rem;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    }
+
+    h1 {
+        margin-top: 0px;
+        text-align: left;
+        color: #2c2c2c;
+        text-shadow: 1px 1px 1px #fff9;
+    }
+
+    h2, h3 {
+        color: #2c2c2c;
+        text-shadow: 1px 1px 1px #fff9;
+    }
+        /* Obal vstupních polí – zarovnání na střed */
+        .param-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+
+        /* Šířka všech vstupních polí */
+        .param-container .stNumberInput, 
+        .param-container div[data-baseweb="select"] {
+            width: 300px !important;
+        }
+
+
+    .stTextInput, .stNumberInput, .stSelectbox {
+        background-color: #ffffffcc;
+        border-radius: 8px;
+    }
+
+    button[kind="primary"] {
+        background-color: #8b5e3c;
+        color: white;
+        border-radius: 8px;
+        border: none;
+        padding: 0.5rem 1.5rem;
+        font-weight: bold;
+    }
+
+    button[kind="primary"]:hover {
+        background-color: #5c3a1e;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
 st.title("Rozlosování a evidence mariášového turnaje")
 
 # ===== SEATING DEFINITIONS =====
@@ -460,13 +535,14 @@ if 'confirmed' not in st.session_state:
     st.session_state.confirmed = False
 
 if not st.session_state.confirmed:
-    col1, col2, col3 = st.columns(3)
+    col1, col2 = st.columns(2)
     with col1:
         group_size = st.radio("Počet hráčů u stolu", sorted(grouped_by_group_size.keys()), index=0, horizontal=True)
     with col2:
         # Add tournament type selection
         tournament_type = st.radio("Typ turnaje", ["UNIKÁTNÍ", "ŠVÝCARSKÝ SYSTÉM"], horizontal=True)
-        
+    col1, col2 = st.columns(2)  # Nový řádek se 2 sloupci
+    with col1:
         if tournament_type == "UNIKÁTNÍ":
             player_options = grouped_by_group_size[group_size]
             players = st.selectbox("Počet hráčů", sorted(player_options))
@@ -478,8 +554,8 @@ if not st.session_state.confirmed:
                 min_players = 16
             player_options = list(range(min_players, 201, group_size))
             players = st.selectbox("Počet hráčů", player_options)
-    
-    with col3:
+        
+    with col2:
         if tournament_type == "UNIKÁTNÍ":
             key = f"{players}_{group_size}"
             max_rounds = len(SEATING_DEFINITIONS[key]["rounds"])
@@ -488,7 +564,7 @@ if not st.session_state.confirmed:
             # Swiss system - fixed 1-15 rounds
             rounds = st.selectbox("Počet kol", list(range(1, 16)))
     
-    vklad = st.number_input("Startovní vklad na hráče (Kč)", min_value=0, step=10)
+        vklad = st.number_input("Startovní vklad na hráče (Kč)", min_value=0, step=10)
 
     if st.button("Potvrdit údaje"):
         st.session_state.players = players
