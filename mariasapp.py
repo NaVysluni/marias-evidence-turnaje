@@ -6,7 +6,7 @@ from collections import Counter
 from itertools import combinations
 import random
 
-st.set_page_config(layout="wide")
+st.set_page_config(layout="centered")
 st.markdown(
     """
     <style>
@@ -81,9 +81,11 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
-
-st.title("Rozlosování a evidence mariášového turnaje")
-
+col1, col2 = st.columns([0.7, 0.3])
+with col1:
+    st.header("Rozlosování a evidence mariášového turnaje")
+with col2:
+    st.image("https://marias-turnaj.zya.me/marias.png")
 # ===== SEATING DEFINITIONS =====
 SEATING_DEFINITIONS = {
     # 3členné skupiny
@@ -836,3 +838,6 @@ if st.session_state.get("finished") and "results" in st.session_state:
         file_name="vysledky_turnaje.html",
         mime="text/html"
     )
+
+
+
