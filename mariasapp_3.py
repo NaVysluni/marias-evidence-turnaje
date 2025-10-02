@@ -1,0 +1,641 @@
+import streamlit as st
+
+st.set_page_config(layout="centered")
+
+import pandas as pd
+import tempfile
+import base64
+from collections import Counter
+from itertools import combinations
+import random
+import json
+import io
+
+st.markdown(
+    """
+    <style>
+    /* Odsazení celého hlavního obsahu od horního okraje */
+    main > div:has(.block-container) {
+        padding-top: 60px;
+    }
+    .stApp {
+        background-image: url('https://img41.rajce.idnes.cz/d4102/19/19642/19642596_185bd55429092dbd5dccd20ff2c485cb/images/card_back_texture.jpg?ver=0');
+        background-repeat: repeat;
+        background-size: 100px 100px;
+        background-attachment: fixed;
+        font-family: 'Segoe UI', sans-serif;
+    }
+
+    /* Pozadí hlavního kontejneru – textura papíru */
+    .block-container {
+        background-image: url('https://img41.rajce.idnes.cz/d4102/19/19642/19642596_185bd55429092dbd5dccd20ff2c485cb/images/paper.jpg?ver=0');
+        background-repeat: repeat;
+        background-size: 300px 300px;
+        background-color: rgba(255, 255, 255, 0.75);
+        border-radius: 16px;
+        padding: 2rem;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    }
+
+    h1 {
+        margin-top: 0px;
+        text-align: left;
+        color: #2c2c2c;
+        text-shadow: 1px 1px 1px #fff9;
+    }
+
+    h2, h3 {
+        color: #2c2c2c;
+        text-shadow: 1px 1px 1px #fff9;
+    }
+        /* Obal vstupních polí – zarovnání na střed */
+        .param-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+
+        /* Šířka všech vstupních polí */
+        .param-container .stNumberInput, 
+        .param-container div[data-baseweb="select"] {
+            width: 300px !important;
+        }
+
+
+    .stTextInput, .stNumberInput, .stSelectbox {
+        background-color: #ffffffcc;
+        border-radius: 8px;
+    }
+
+    button[kind="primary"] {
+        background-color: #8b5e3c;
+        color: white;
+        border-radius: 8px;
+        border: none;
+        padding: 0.5rem 1.5rem;
+        font-weight: bold;
+    }
+
+    button[kind="primary"]:hover {
+        background-color: #5c3a1e;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
+# ===== FUNKCE PRO UKLÁDÁNÍ A NAČÍTÁNÍ =====
+def export_tournament_data():
+    """Exportuje data turnaje pro stažení"""
+    tournament_data = {
+        'players': st.session_state.get('players'),
+        'rounds': st.session_state.get('rounds'),
+        'vklad': st.session_state.get('vklad'),
+        'group_size': st.session_state.get('group_size'),
+        'tournament_type': st.session_state.get('tournament_type'),
+        'player_names': st.session_state.get('player_names', []),
+        'rozlosovani': st.session_state.get('rozlosovani', []),
+        'results': st.session_state.get('results', {}),
+        'current_round': st.session_state.get('current_round', 1),
+        'finished': st.session_state.get('finished', False),
+        'player_scores': st.session_state.get('player_scores', {})
+    }
+    return json.dumps(tournament_data, ensure_ascii=False, indent=2)
+
+def import_tournament_data(json_data):
+    """Importuje data turnaje z JSON"""
+    try:
+        data = json.loads(json_data)
+        
+        # Obnovení session state
+        st.session_state.players = data.get('players')
+        st.session_state.rounds = data.get('rounds')
+        st.session_state.vklad = data.get('vklad')
+        st.session_state.group_size = data.get('group_size')
+        st.session_state.tournament_type = data.get('tournament_type')
+        st.session_state.player_names = data.get('player_names', [])
+        st.session_state.rozlosovani = data.get('rozlosovani', [])
+        st.session_state.results = data.get('results', {})
+        st.session_state.current_round = data.get('current_round', 1)
+        st.session_state.finished = data.get('finished', False)
+        st.session_state.player_scores = data.get('player_scores', {})
+        st.session_state.confirmed = True
+        
+        # Pokud je turnaj dokončený, přeskočíme na výsledky
+        if st.session_state.finished:
+            st.success("Načten dokončený turnaj!")
+        elif st.session_state.results:
+            # Najdeme nejvyšší kolo s výsledky
+            max_round_with_results = max(int(k) for k in st.session_state.results.keys())
+            # Nastavíme current_round na další kolo po posledním s výsledky
+            st.session_state.current_round = max_round_with_results + 1
+            st.success(f"Načteno {len(st.session_state.results)} kol s výsledky. Pokračujte v kole {st.session_state.current_round}")
+        
+        return True
+    except Exception as e:
+        st.error(f"Chyba při importu dat: {e}")
+        return False
+
+col1, col2 = st.columns([0.7, 0.3])
+with col1:
+    st.header("Rozlosování a evidence mariášového turnaje")
+with col2:
+    st.image("https://marias-turnaj.zya.me/marias.png")
+
+# ===== TLAČÍTKA PRO SPRÁVU TURNAJE =====
+if st.session_state.get('confirmed'):
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("Správa turnaje")
+    
+    # Export turnaje
+    tournament_json = export_tournament_data()
+    st.sidebar.download_button(
+        label="💾 Uložit turnaj",
+        data=tournament_json,
+        file_name=f"marias_turnaj_{pd.Timestamp.now().strftime('%Y%m%d_%H%M')}.json",
+        mime="application/json"
+    )
+    
+    # Import turnaje
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("Načíst turnaj")
+    
+    uploaded_file = st.sidebar.file_uploader("Vyberte soubor s turnajem", type=['json'])
+    if uploaded_file is not None:
+        try:
+            json_data = uploaded_file.getvalue().decode('utf-8')
+            if st.sidebar.button("📤 Načíst turnaj ze souboru"):
+                if import_tournament_data(json_data):
+                    st.sidebar.success("Turnaj úspěšně načten!")
+                    st.rerun()
+        except Exception as e:
+            st.sidebar.error(f"Chyba při načítání souboru: {e}")
+
+# ===== SEATING DEFINITIONS (ZKRÁCENÉ) =====
+SEATING_DEFINITIONS = {
+    '9_3': {
+        'group_size': 3,
+        'description': "Kirkman Triple System (KTS(9))",
+        'rounds': [
+            [[1,2,3], [4,5,6], [7,8,9]],
+            [[1,4,7], [2,5,8], [3,6,9]],
+            [[1,5,9], [2,6,7], [3,4,8]],
+            [[1,6,8], [2,4,9], [3,5,7]]
+        ]
+    },
+    '12_3': {
+        'group_size': 3,
+        'description': "Kirkman Triple System (KTS(12))",
+        'rounds': [
+            [[1,2,3], [4,5,6], [7,8,9], [10,11,12]],
+            [[1,4,10], [5,7,11], [2,6,8], [3,9,12]],
+            [[1,5,9], [4,8,12], [2,7,10], [3,6,11]]
+        ]
+    },
+    '15_3': {
+        'group_size': 3,
+        'description': "Kirkman Triple System (KTS(15))",
+        'rounds': [
+            [[1,2,3],[4,5,6],[7,8,9],[10,11,12],[13,14,15]],
+            [[1,4,7],[2,5,10],[3,6,13],[8,11,14],[9,12,15]],
+            [[1,5,14],[2,4,15],[3,8,12],[6,9,11],[7,10,13]]
+        ]
+    },
+    '18_3': {
+        'group_size': 3,
+        'description': "Kirkman Triple System (KTS(18))",
+        'rounds': [
+            [[1,2,3],[4,5,6],[7,8,9],[10,17,15],[13,11,18],[16,14,12]],
+            [[1,11,12],[4,14,15],[7,17,18],[10,8,6],[13,2,9],[16,5,3]]
+        ]
+    },
+    '16_4': {
+        'group_size': 4,
+        'description': "Řešitelný Steinerův čtyřnásobný systém (RSQS(16))",
+        'rounds': [
+            [[1,2,3,4], [5,6,7,8], [9,10,11,12], [13,14,15,16]],
+            [[1,5,9,13], [2,6,10,14], [3,7,11,15], [4,8,12,16]],
+            [[1,6,11,16], [2,5,12,15], [3,8,9,14], [4,7,10,13]]
+        ]
+    },
+    '20_4': {
+        'group_size': 4,
+        'description': "Řešitelný Steinerův čtyřnásobný systém (RSQS(20))",
+        'rounds': [
+            [[1,2,3,4], [5,6,7,8], [9,10,11,12], [13,14,15,16], [17,18,19,20]],
+            [[1,5,9,13], [2,6,10,17], [3,7,14,18], [4,11,15,19], [8,12,16,20]]
+        ]
+    },
+    '24_4': {
+        'group_size': 4,
+        'description': "Řešitelný Steinerův čtyřnásobný systém (RSQS(24))",
+        'rounds': [
+            [[1,2,11,21],[9,10,19,5],[17,18,3,13],[4,7,6,24],[8,12,14,15],[16,20,22,23]],
+            [[1,3,12,22],[9,11,20,6],[17,19,4,14],[5,8,7,18],[2,13,15,16],[10,21,23,24]]
+        ]
+    }
+}
+
+# ===== PŘÍPRAVA MOŽNOSTÍ Z SEATING_DEFINITIONS =====
+available_keys = list(SEATING_DEFINITIONS.keys())
+available_options = sorted(set((int(k.split('_')[0]), int(k.split('_')[1])) for k in available_keys))
+grouped_by_group_size = {}
+for p, g in available_options:
+    grouped_by_group_size.setdefault(g, []).append(p)
+
+# ===== Krok 1: Volba počtu hráčů a hry =====
+if 'confirmed' not in st.session_state:
+    st.session_state.confirmed = False
+
+if not st.session_state.confirmed:
+    col1, col2 = st.columns(2)
+    with col1:
+        group_size = st.radio("Počet hráčů u stolu", sorted(grouped_by_group_size.keys()), index=0, horizontal=True)
+    with col2:
+        tournament_type = st.radio("Typ turnaje", ["UNIKÁTNÍ", "ŠVÝCARSKÝ SYSTÉM"], horizontal=True)
+    col1, col2 = st.columns(2)
+    with col1:
+        if tournament_type == "UNIKÁTNÍ":
+            player_options = grouped_by_group_size[group_size]
+            players = st.selectbox("Počet hráčů", sorted(player_options))
+        else:
+            if group_size == 3:
+                min_players = 9
+            else:
+                min_players = 16
+            player_options = list(range(min_players, 201, group_size))
+            players = st.selectbox("Počet hráčů", player_options)
+        
+    with col2:
+        if tournament_type == "UNIKÁTNÍ":
+            key = f"{players}_{group_size}"
+            max_rounds = len(SEATING_DEFINITIONS[key]["rounds"])
+            rounds = st.selectbox("Počet kol", list(range(1, max_rounds + 1)))
+        else:
+            rounds = st.selectbox("Počet kol", list(range(1, 16)))
+    
+        vklad = st.number_input("Startovní vklad na hráče (Kč)", min_value=0, step=10)
+
+    if st.button("Potvrdit údaje"):
+        st.session_state.players = players
+        st.session_state.rounds = rounds
+        st.session_state.vklad = vklad
+        st.session_state.group_size = group_size
+        st.session_state.tournament_type = tournament_type
+        st.session_state.confirmed = True
+        st.rerun()
+else:
+    st.info(f"{st.session_state.players} hráčů, {st.session_state.rounds} kol, {st.session_state.group_size} u stolu, vklad {st.session_state.vklad} Kč, {st.session_state.tournament_type}")
+    if st.button("🔁 Změnit údaje"):
+        for k in ["confirmed", "players", "rounds", "vklad", "group_size", "player_names", "rozlosovani", "results", "finished", "current_round", "tournament_type", "player_scores"]:
+            st.session_state.pop(k, None)
+        st.rerun()
+
+# ===== Krok 2: Zadání jmen hráčů =====
+if st.session_state.confirmed and 'player_names' not in st.session_state:
+    st.subheader("Zadejte jména hráčů")
+    name_inputs = []
+    col1, col2 = st.columns(2)
+    for i in range(1, st.session_state.players + 1):
+        with (col1 if i <= st.session_state.players / 2 else col2):
+            name = st.text_input(f"Hráč {i}", value=f"Hráč {i}", key=f"name_{i}")
+            name_inputs.append(name.strip())
+
+    duplicates = {name for name, count in Counter(name_inputs).items() if count > 1}
+    for name in duplicates:
+        st.markdown(f"<span style='color:red;'>⚠️ Duplicitní jméno: {name}</span>", unsafe_allow_html=True)
+
+    if not duplicates and st.button("Pokračovat"):
+        st.session_state.player_names = name_inputs
+        if st.session_state.tournament_type == "ŠVÝCARSKÝ SYSTÉM":
+            st.session_state.player_scores = {name: 0 for name in name_inputs}
+        st.rerun()
+
+# ===== Krok 3: Rozlosování =====
+def generate_swiss_round(players, group_size, current_round):
+    """Generate pairings for a Swiss system round"""
+    if current_round == 1:
+        random.shuffle(players)
+    else:
+        sorted_players = sorted(players, key=lambda x: st.session_state.player_scores[x], reverse=True)
+        players = sorted_players
+    
+    groups = []
+    for i in range(0, len(players), group_size):
+        group = players[i:i+group_size]
+        if len(group) == group_size:
+            groups.append(group)
+    
+    if len(players) % group_size != 0:
+        leftovers = len(players) % group_size
+        for i in range(leftovers):
+            groups[i].append(players[-(i+1)])
+    
+    return groups
+
+if 'player_names' in st.session_state and 'rozlosovani' not in st.session_state:
+    if st.session_state.tournament_type == "UNIKÁTNÍ":
+        key = f"{st.session_state.players}_{st.session_state.group_size}"
+        raw_def = SEATING_DEFINITIONS[key]["rounds"][:st.session_state.rounds]
+        schedule = []
+        for rnd in raw_def:
+            round_groups = []
+            for group in rnd:
+                group_filtered = [p for p in group if p <= st.session_state.players]
+                if len(group_filtered) == len(group):
+                    round_groups.append([st.session_state.player_names[p - 1] for p in group_filtered])
+            schedule.append(round_groups)
+        st.session_state.rozlosovani = schedule
+    else:
+        first_round = generate_swiss_round(st.session_state.player_names.copy(), st.session_state.group_size, 1)
+        st.session_state.rozlosovani = [first_round]
+        for _ in range(1, st.session_state.rounds):
+            st.session_state.rozlosovani.append([])
+
+# ===== ZOBRAZENÍ ROZLOSOVÁNÍ NEBO POKRAČOVÁNÍ =====
+if 'rozlosovani' in st.session_state and 'results' not in st.session_state and not st.session_state.get('finished'):
+    st.subheader("📋 Rozlosování")
+    
+    # Pokud už máme nějaké výsledky (načtené ze souboru), ukážeme přehled
+    if st.session_state.get('results'):
+        st.info("🔄 Načtený turnaj - přehled výsledků")
+        all_rounds = [entry for r in st.session_state.results.values() for entry in r]
+        if all_rounds:
+            df_preview = pd.DataFrame(all_rounds)
+            df_preview = df_preview.groupby("Hráč")["Zisk"].sum().reset_index().sort_values(by="Zisk", ascending=False)
+            st.markdown("### 📈 Aktuální pořadí")
+            st.dataframe(df_preview, use_container_width=True, hide_index=True)
+        
+        # Tlačítko pro pokračování v zadávání
+        if st.button("➡️ Pokračovat v zadávání výsledků"):
+            st.session_state.current_round = st.session_state.get('current_round', 1)
+            st.rerun()
+    else:
+        # Normální zobrazení rozlosování pro nový turnaj
+        for rnd_idx, rnd in enumerate(st.session_state.rozlosovani, 1):
+            st.markdown(f"### Kolo {rnd_idx}")
+            if rnd:
+                for table_idx, group in enumerate(rnd, 1):
+                    st.write(f"Stůl {table_idx}: {', '.join(group)}")
+            else:
+                st.write("(Rozlosování bude vygenerováno po zadání předchozího kola)")
+
+        if st.button("Zadávat výsledky"):
+            st.session_state.results = {}
+            st.session_state.current_round = 1
+            st.rerun()
+
+# ===== Krok 4: Zadávání výsledků =====
+if 'results' in st.session_state and not st.session_state.get('finished'):
+    rnd_idx = st.session_state.current_round
+    schedule = st.session_state.rozlosovani
+    
+    # For Swiss system, generate next round if needed
+    if st.session_state.tournament_type == "ŠVÝCARSKÝ SYSTÉM" and rnd_idx > 1 and len(schedule) >= rnd_idx and not schedule[rnd_idx-1]:
+        next_round = generate_swiss_round(st.session_state.player_names.copy(), st.session_state.group_size, rnd_idx)
+        st.session_state.rozlosovani[rnd_idx-1] = next_round
+        schedule = st.session_state.rozlosovani
+    
+    st.subheader(f"✍️ Zadání výsledků – Kolo {rnd_idx}")
+    
+    # Zobrazíme přehled předchozích kol pokud existují
+    if st.session_state.results and rnd_idx > 1:
+        st.info(f"📊 Máte zadáno {len(st.session_state.results)} kol")
+    
+    round_data = []
+    valid_round = True
+    
+    for table_idx, group in enumerate(schedule[rnd_idx - 1], 1):
+        st.markdown(f"**Stůl {table_idx}: {', '.join(group)}**")
+        sum_na_stole, sum_dokup = 0, 0
+        table_entries = []
+        
+        for player in group:
+            col1, col2 = st.columns(2)
+            with col1:
+                na_stole = st.number_input(f"{player} – na stole (Kč)", min_value=0, step=10, key=f"stole_{rnd_idx}_{table_idx}_{player}")
+            with col2:
+                dokup = st.number_input(f"{player} – dokup (Kč)", min_value=0, step=10, key=f"dokup_{rnd_idx}_{table_idx}_{player}")
+            sum_na_stole += na_stole
+            sum_dokup += dokup
+            zisk = na_stole - st.session_state.vklad - dokup
+            table_entries.append({"Hráč": player, "Na stole": na_stole, "Dokup": dokup, "Stůl": table_idx, "Kolo": rnd_idx, "Zisk": zisk})
+
+        expected = st.session_state.vklad * len(group)
+        diff = expected + sum_dokup - sum_na_stole
+        if diff != 0:
+            st.error(f"❌ Nesedí vklady: rozdíl {diff} Kč")
+            valid_round = False
+        else:
+            st.success("✅ Vklady souhlasí")
+
+        df_table = pd.DataFrame(table_entries)
+        max_zisk = df_table["Zisk"].max()
+        min_zisk = df_table["Zisk"].min()
+        for _, row in df_table.iterrows():
+            style = ""
+            if row["Zisk"] == max_zisk:
+                style = "color:green; font-weight:bold"
+            elif row["Zisk"] == min_zisk:
+                style = "color:red; font-weight:bold"
+            st.markdown(f"<div style='{style}'>{row['Hráč']}: zisk {row['Zisk']} Kč</div>", unsafe_allow_html=True)
+
+        round_data.extend(table_entries)
+
+    # Průběžné pořadí - POUZE Z ULOŽENÝCH KOL
+    all_rounds_preview = [entry for r in st.session_state.results.values() for entry in r]
+    if all_rounds_preview:
+        df_preview = pd.DataFrame(all_rounds_preview)
+        df_preview = df_preview.groupby("Hráč")["Zisk"].sum().reset_index().sort_values(by="Zisk", ascending=False)
+        
+        st.markdown("### 📈 Průběžné pořadí")
+        st.dataframe(df_preview, use_container_width=True, hide_index=True)
+
+    # Tlačítka pro akce
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        tournament_json = export_tournament_data()
+        st.download_button(
+            label="💾 Uložit a pozastavit",
+            data=tournament_json,
+            file_name=f"marias_turnaj_kolo_{rnd_idx}_{pd.Timestamp.now().strftime('%Y%m%d_%H%M')}.json",
+            mime="application/json",
+            key=f"save_pause_{rnd_idx}"
+        )
+    
+    with col2:
+        if st.button("📅 Uložit kolo a pokračovat", key=f"save_continue_{rnd_idx}"):
+            if not valid_round:
+                st.warning("Nelze uložit kolo, dokud nejsou vklady vyrovnané.")
+            else:
+                # ULOŽENÍ VÝSLEDKŮ KOLA
+                st.session_state.results[rnd_idx] = round_data
+                st.success(f"Kolo {rnd_idx} úspěšně uloženo!")
+                
+                # Aktualizace skóre pro Švýcarský systém
+                if st.session_state.tournament_type == "ŠVÝCARSKÝ SYSTÉM":
+                    for entry in round_data:
+                        player = entry["Hráč"]
+                        zisk = entry["Zisk"]
+                        st.session_state.player_scores[player] = st.session_state.player_scores.get(player, 0) + zisk
+                
+                # Přesun na další kolo nebo konec
+                if rnd_idx < st.session_state.rounds:
+                    st.session_state.current_round += 1
+                    st.rerun()
+                else:
+                    st.success("🎉 Všechna kola byla zadána!")
+                    st.session_state.finished = True
+                    st.rerun()
+    
+    with col3:
+        if rnd_idx > 1 and st.button("⏮️ Zobrazit předchozí kola", key=f"go_back_{rnd_idx}"):
+            st.session_state.show_previous = True
+            st.rerun()
+
+# ===== ZOBRAZENÍ PŘEDCHOZÍCH KOL =====
+if st.session_state.get('show_previous'):
+    st.subheader("📜 Přehled zadaných kol")
+    
+    all_results = []
+    for rnd_idx in sorted(int(k) for k in st.session_state.results.keys()):
+        entries = st.session_state.results.get(str(rnd_idx), [])
+        if entries:
+            st.markdown(f"### Kolo {rnd_idx}")
+            df = pd.DataFrame(entries)
+            df["Zisk"] = df["Zisk"].astype(int)
+
+            max_zisk = df["Zisk"].max()
+            min_zisk = df["Zisk"].min()
+
+            def color_zisk(val):
+                if val == max_zisk:
+                    return "background-color: #d4f7d4; font-weight: bold"
+                elif val == min_zisk:
+                    return "background-color: #fdd; font-weight: bold"
+                return ""
+
+            styled_df = df.style.map(color_zisk, subset=["Zisk"])
+            st.dataframe(styled_df, use_container_width=True, hide_index=True)
+            
+            for e in entries:
+                all_results.append(e)
+    
+    if all_results:
+        df_all = pd.DataFrame(all_results)
+        total_zisky = df_all.groupby("Hráč")["Zisk"].sum().sort_values(ascending=False)
+        st.markdown("### 📊 Celkové pořadí")
+        for hrac, zisk in total_zisky.items():
+            color = "green" if zisk > 0 else ("red" if zisk < 0 else "black")
+            st.markdown(f"<span style='color:{color}; font-weight:bold'>{hrac}: {zisk:+} Kč</span>", unsafe_allow_html=True)
+    
+    if st.button("↩️ Vrátit se k zadávání"):
+        st.session_state.show_previous = False
+        st.rerun()
+
+# ===== Po posledním kole: souhrn kol a export =====
+if st.session_state.get("finished") and "results" in st.session_state:
+    st.subheader("📜 Výsledky všech kol")
+    
+    st.download_button(
+        label="💾 Uložit kompletní turnaj",
+        data=export_tournament_data(),
+        file_name=f"marias_turnaj_kompletni_{pd.Timestamp.now().strftime('%Y%m%d_%H%M')}.json",
+        mime="application/json"
+    )
+
+    all_results = []
+    
+    # Projdeme všechna kola od 1 do celkového počtu kol
+    for rnd_idx in range(1, st.session_state.rounds + 1):
+        # Získání výsledků pro dané kolo
+        entries = st.session_state.results.get(str(rnd_idx), [])
+        
+        st.markdown(f"### 🕒 Kolo {rnd_idx}")
+        
+        if entries:
+            df = pd.DataFrame(entries)
+            df["Zisk"] = df["Zisk"].astype(int)
+
+            max_zisk = df["Zisk"].max()
+            min_zisk = df["Zisk"].min()
+
+            def color_zisk(val):
+                if val == max_zisk:
+                    return "background-color: #d4f7d4; font-weight: bold"
+                elif val == min_zisk:
+                    return "background-color: #fdd; font-weight: bold"
+                return ""
+
+            styled_df = df.style.map(color_zisk, subset=["Zisk"])
+            st.dataframe(styled_df, use_container_width=True, hide_index=True)
+
+            for e in entries:
+                e["Kolo"] = rnd_idx
+                all_results.append(e)
+        else:
+            st.info(f"Kolo {rnd_idx} nemá zadané výsledky")
+
+    df_all = pd.DataFrame(all_results)
+
+    # Celkové zisky
+    st.subheader("💰 Konečný zisk hráčů")
+    total_zisky = df_all.groupby("Hráč")["Zisk"].sum().sort_values(ascending=False)
+    for hrac, zisk in total_zisky.items():
+        color = "green" if zisk > 0 else ("red" if zisk < 0 else "black")
+        st.markdown(f"<span style='color:{color}; font-weight:bold'>{hrac}: {zisk:+} Kč</span>", unsafe_allow_html=True)
+
+    # Export do CSV
+    csv_buffer = io.BytesIO()
+    csv_content = df_all.to_csv(index=False, sep=";", encoding="cp1250")
+    csv_buffer.write(csv_content.encode("cp1250"))
+    csv_buffer.seek(0)
+    
+    st.download_button(
+        label="📅 Stáhnout výsledky jako CSV",
+        data=csv_buffer,
+        file_name="vysledky_marias.csv",
+        mime="text/csv"
+    )
+
+    # Export HTML pro tisk/PDF
+    html_output = "<h2>Výsledky mariášového turnaje</h2>"
+    for rnd_idx in range(1, st.session_state.rounds + 1):
+        entries = st.session_state.results.get(str(rnd_idx), [])
+        if not entries:
+            continue
+        html_output += f"<h3>Kolo {rnd_idx}</h3><table border='1' cellspacing='0' cellpadding='4'><tr><th>Hráč</th><th>Na stole</th><th>Dokup</th><th>Zisk</th></tr>"
+        df = pd.DataFrame(entries)
+        max_zisk = df["Zisk"].max()
+        min_zisk = df["Zisk"].min()
+        for _, row in df.iterrows():
+            style = ""
+            if row["Zisk"] == max_zisk:
+                style = " style='background-color:#d4f7d4; font-weight:bold'"
+            elif row["Zisk"] == min_zisk:
+                style = " style='background-color:#fdd; font-weight:bold'"
+            html_output += f"<tr{style}><td>{row['Hráč']}</td><td>{row['Na stole']}</td><td>{row['Dokup']}</td><td>{row['Zisk']}</td></tr>"
+        html_output += "</table><br>"
+
+    html_output += "<h3>Konečný zisk hráčů</h3><ul>"
+    for hrac, zisk in total_zisky.items():
+        color = "green" if zisk > 0 else ("red" if zisk < 0 else "black")
+        html_output += f"<li><span style='color:{color}; font-weight:bold'>{hrac}: {zisk:+} Kč</span></li>"
+    html_output += "</ul>"
+
+    with tempfile.NamedTemporaryFile("w", delete=False, suffix=".html", encoding="utf-8") as f:
+        f.write(html_output)
+        html_path = f.name
+
+    with open(html_path, "r", encoding="utf-8") as f:
+        html_data = f.read()
+
+    st.download_button(
+        label="🖊️ Stáhnout výsledky jako HTML (pro tisk nebo PDF)",
+        data=html_data,
+        file_name="vysledky_turnaje.html",
+        mime="text/html"
+    )
